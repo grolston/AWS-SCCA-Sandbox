@@ -1,0 +1,25 @@
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: SNS for Opsgenie CW and CW Events
+Parameters:
+  pOpsgenieAPIKeyCW:
+    Type: String
+    Description: Your Opsgenie API Key.
+  pOpsgenieAPIKeyCWEvent:
+    Type: String
+    Description: Your Opsgenie API Key.
+Resources:
+  rOpsgenieCW:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: AB3CWAlert
+      Subscription:
+        - Endpoint: !Sub 'https://api.opsgenie.com/v1/json/cloudwatch?apiKey=${pOpsgenieAPIKeyCW}'
+          Protocol: https
+  rOpsgenieCWEvent:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: AB3CWEventAlert
+      Subscription:
+        - Endpoint: !Sub 'https://api.opsgenie.com/v1/json/cloudwatchevents?apiKey=${pOpsgenieAPIKeyCWEvent}'
+          Protocol: https

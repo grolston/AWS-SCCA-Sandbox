@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation Drift Detect'
+
+Parameters: {}
+
+
+Resources:
+  ConfigRule:
+    Type: 'AWS::Config::ConfigRule'
+    Properties:
+      ConfigRuleName: cloudformation-stack-drift-detection-check
+      Scope:
+        ComplianceResourceTypes:
+          - 'AWS::CloudFormation::Stack'
+      Description: >-
+        A config rule that checks whether an AWS CloudFormation stack's actual
+        configuration differs, or has drifted, from it's expected configuration.
+      InputParameters:
+        cloudformationRoleArn: !GetAtt IamRole.Arn
+      Source:
+        Owner: AWS
+        SourceIdentifier: CLOUDFORMATION_STACK_DRIFT_DETECTION_CHECK
+      MaximumExecutionFrequency: One_Hour
+
+  IamRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub CfnDriftDetectionRole-${AWS::Region}
+      Description: IAM role for CloudFormation Drift Detection
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - config.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/ReadOnlyAccess'
+
+
+  CfnDriftDetectPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Description: Permissions to detect drift in cloudformation
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+                  - 'cloudformation:DetectStackResourceDrift'
+                  - 'cloudformation:DescribeStackDriftDetectionStatus'
+                  - 'cloudformation:DetectStackDrift'
+            Resource: '*'
+      Roles:
+        - !Ref IamRole
