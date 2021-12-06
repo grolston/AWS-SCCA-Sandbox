@@ -1,0 +1,36 @@
+name: 'main'
+
+on: [push]
+
+jobs:
+
+  validate_cfn-nag:
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - uses: actions/checkout@v2
+    - uses: grolston/cfn-security@v1
+      with:
+        cloudformation_directory: "./cloudformation/"
+        scanner: "cfn-nag"
+
+  ## cfn-lint scan
+  validate-cfn-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: grolston/cfn-security@v1
+      with:
+        cloudformation_directory: './cloudformation/' ## change to your template directory
+        scanner: "cfn-lint"
+
+  ## checkov security scan
+  validate_checkov:
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - uses: actions/checkout@v2
+    - uses: grolston/cfn-security@v1
+      with:
+        cloudformation_directory: "./cloudformation/"
+        scanner: "checkov"
