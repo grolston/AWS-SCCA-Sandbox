@@ -364,11 +364,6 @@ Resources:
           ToPort: 443
           CidrIp: !Ref pVPCCidr
           Description: Local VPC CIDR
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 10.0.0.0/16
-          Description: VDSS Internal
 
   rApiVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -393,6 +388,7 @@ Resources:
         - !Ref rSubnetA
         - !Ref rSubnetB
         - !If [3AZDeployment ,!Ref rSubnetC, !Ref "AWS::NoValue"]
+
   ## Route for Transit Gateway
   rRoute0:
     Type: AWS::EC2::Route
@@ -401,6 +397,7 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       TransitGatewayId: !Ref pTgwId
       RouteTableId: !Ref rRouteTable
+
 Outputs:
   oVpc:
     Description: VPC ID
