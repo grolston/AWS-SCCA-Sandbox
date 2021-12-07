@@ -247,6 +247,10 @@ Resources:
           FromPort: 2049
           ToPort: 2049
           SourceSecurityGroupId: !Ref WebServerSecurityGroup
+      SecurityGroupEgress:
+        - Description: Outbound unrestricted traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
 
   EfsSecurityGroupIngress:
     Type: AWS::EC2::SecurityGroupIngress
@@ -270,6 +274,10 @@ Resources:
           FromPort: 8
           ToPort: 80
           CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - Description: Outbound unrestricted traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
       VpcId:
         !Ref VpcId
 
@@ -286,6 +294,10 @@ Resources:
             FromPort: 443
             ToPort: 443
             SourceSecurityGroupId: !Ref AlbSecurityGroup
+        SecurityGroupEgress:
+          - Description: Outbound unrestricted traffic
+            IpProtocol: "-1"
+            CidrIp: 0.0.0.0/0
         VpcId: !Ref VpcId
 
   DatabaseSecurityGroup:
@@ -297,6 +309,10 @@ Resources:
             FromPort: 3306
             ToPort: 3306
             SourceSecurityGroupId: !Ref WebServerSecurityGroup
+        SecurityGroupEgress:
+          - Description: Outbound unrestricted traffic
+            IpProtocol: "-1"
+            CidrIp: 0.0.0.0/0
         VpcId: !Ref VpcId
 
 
@@ -306,6 +322,7 @@ Resources:
     Type: AWS::EFS::FileSystem
     Properties:
       PerformanceMode: !Ref PerformanceMode
+      Encrypted: true
 
   ElasticFileSystemMountTarget0:
     Condition: Subnet0
@@ -378,6 +395,15 @@ Resources:
 
   DB:
     Type: AWS::RDS::DBInstance
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F24
+            reason: TODO implement secrets manager
+          - id: F27
+            reason: TODO implement secrets manager
+          - id: F80
+            reason: Deletion policy set for POC
     DeletionPolicy: Delete
     Properties:
         AllocatedStorage: "5"
@@ -391,8 +417,7 @@ Resources:
             - !Ref DatabaseSecurityGroup
         DBSubnetGroupName: !Ref DbSubnetGroup
         MultiAZ: !Ref MultiAvailabilityZone
-    DependsOn:
-        - DbSubnetGroup
+        PubliclyAccessible: false
 
 ################################
 ## ALB
