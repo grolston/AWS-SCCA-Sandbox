@@ -523,7 +523,11 @@ Resources:
   LaunchConfig:
       Type: AWS::AutoScaling::LaunchConfiguration
       Metadata:
-        'AWS::CloudFormation::Init':
+        cfn-lint:
+          config:
+            ignore_checks:
+              - W4002
+        AWS::CloudFormation::Init:
           configSets:
             wordpress:
               - "configure_cfn"
@@ -576,7 +580,7 @@ Resources:
             commands:
               01_clone_config:
                 cwd: "/var/www/html"
-                command: !Sub |
+                command: |
                     cd /var/www/html
                     cp -r wordpress/* /var/www/html/
                     rm -rf wordpress
@@ -600,7 +604,7 @@ Resources:
                   sed -i 's/password_here/${DatabasePassword}/g' wp-config.php
               06_wordpress_permissions:
                 cwd: "/var/www/html"
-                command: !Sub |
+                command: |
                   chmod -R 755 wp-content
                   chown -R apache:apache wp-content
                   chown -R apache /var/www
