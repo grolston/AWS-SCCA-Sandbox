@@ -260,6 +260,7 @@ Resources:
       FromPort: 2049
       ToPort: 2049
       SourceSecurityGroupId: !GetAtt EfsSecurityGroup.GroupId
+      Description: EFS endpoint access
       GroupId: !GetAtt EfsSecurityGroup.GroupId
 
   AlbSecurityGroup:
@@ -314,6 +315,7 @@ Resources:
             FromPort: 3306
             ToPort: 3306
             SourceSecurityGroupId: !Ref WebServerSecurityGroup
+            Description: "Access to Database from web server"
         SecurityGroupEgress:
           - Description: Outbound unrestricted traffic
             IpProtocol: "-1"
@@ -388,12 +390,8 @@ Resources:
   DbSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
-      DBSubnetGroupName: mySubnetgroup
-      DBSubnetGroupDescription:
-        Fn::Join:
-        - ''
-        - - 'RDS Subnet Group for '
-          - Ref: AWS::StackName
+      DBSubnetGroupName: RDSSubnetGroup
+      DBSubnetGroupDescription: !Sub "RDS Subnet Group for ${AWS::StackName}"
       SubnetIds:
       - Ref: PrivateSubnet1
       - Ref: PrivateSubnet2
@@ -412,6 +410,7 @@ Resources:
     DeletionPolicy: Delete
     Properties:
         AllocatedStorage: "5"
+        StorageEncrypted: true
         StorageType: gp2
         DBInstanceClass: !Ref DBSize
         DBName: !Ref DatabaseName
