@@ -150,6 +150,8 @@ Resources:
 
   S3Bucket:
     Type: AWS::S3::Bucket
+    #checkov:skip=CKV_AWS_21:Ensure the S3 bucket has versioning enabled
+    #checkov:skip=CKV_AWS_18:Ensure the S3 bucket has access logging enabled
     Properties:
       AccessControl: Private
       BucketEncryption:
