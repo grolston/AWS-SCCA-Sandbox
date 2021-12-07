@@ -1,0 +1,627 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: AB3 HA WordPress
+
+Metadata:
+
+   Authors:
+    Description: https://github.com/lzrocha
+
+   AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: General AWS
+      Parameters:
+        - WPDomainName
+    - Label:
+        default: Network
+      Parameters:
+        - VpcId
+        - Subnet
+        - NumberOfSubnets
+    - Label:
+        default: File System Tier
+      Parameters:
+        - PerformanceMode
+    - Label:
+        default: Database Tier
+      Parameters:
+        - DBSize
+        - DatabaseUser
+        - DatabasePassword
+        - DatabaseName
+        - MultiAvailabilityZone
+        - PrivateSubnet1
+        - PrivateSubnet2
+    - Label:
+        default: Web Tier
+      Parameters:
+        - LatestAmiId
+        - PublicAlbAcmCertificate
+        - EC2Size
+        - WebAsgMax
+        - WebAsgMin
+    ParameterLabels:
+      DBSize:
+        default: DB Instance Class
+      DatabaseUser:
+        default: DB Master Username
+      DatabasePassword:
+        default: DB Master Password
+      DatabaseName:
+        default: DB Name
+      MultiAvailabilityZone:
+        default: Multi Availability Zone
+      PerformanceMode:
+        default: EFS Performance Mode
+      PrivateSubnet1:
+        default: Database Private subnet 1
+      PrivateSubnet2:
+        default: Database Private subnet 2
+      PublicAlbAcmCertificate:
+        default: ALB Certificate ARN
+      WebAsgMax:
+        default: Web ASG Max
+      WebAsgMin:
+        default: Web ASG Min
+      EC2Size:
+        default: Web Tier Instance Type
+      WPDomainName:
+        default: Site Domain
+      NumberOfSubnets:
+        default: Number of Subnets
+      VpcId:
+        default: Vpc Id
+      Subnet:
+        default: Subnets
+      LatestAmiId:
+        default: Latest AWS Linux 2 AMI
+
+Parameters:
+
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+  VpcId:
+      Description: The Vpc Id of an existing Vpc.
+      Type: AWS::EC2::VPC::Id
+      ConstraintDescription: must be the VPC Id of an existing Virtual Private Cloud.
+  Subnet:
+      Description: The Subnet ID of existing subnets.
+      Type: List<AWS::EC2::Subnet::Id>
+      ConstraintDescription: It is recommended to include all available subnets.
+  NumberOfSubnets:
+      AllowedValues:
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      Default: 3
+      Description: Number of subnets. This must match your selections in the list of Subnets below.
+      Type: String
+  PerformanceMode:
+      AllowedValues:
+        - generalPurpose
+        - maxIO
+      Default: generalPurpose
+      Description: Select the performance mode of the file system.
+      Type: String
+  PrivateSubnet1:
+      Description: DB Private Subnet 1
+      Type: AWS::EC2::Subnet::Id
+  PrivateSubnet2:
+      Description: DB Private Subnet 2
+      Type: AWS::EC2::Subnet::Id
+  MultiAvailabilityZone:
+      Description: Enable Multi Availability Zones?
+      Type: String
+      Default: 'true'
+      AllowedValues:
+      - 'true'
+      - 'false'
+  DatabaseName:
+      Description: The Amazon RDS master database name.
+      AllowedPattern: ^([a-zA-Z0-9]*)$
+      Type: String
+  DatabaseUser:
+      AllowedPattern: ^([a-zA-Z0-9]*)$
+      Description: The Amazon RDS master username.
+      ConstraintDescription: Must contain only alphanumeric characters (minimum 8; maximum 16).
+      MaxLength: 16
+      MinLength: 8
+      Type: String
+  DatabasePassword:
+      AllowedPattern: ^([a-z0-9A-Z`~!#$%^&*()_+,\\-])*$
+      ConstraintDescription: Must be letters (upper or lower), numbers, spaces, and these special characters `~!#$%^&*()_+,-
+      Description: The Amazon RDS master password.
+      MaxLength: 41
+      MinLength: 8
+      NoEcho: true
+      Type: String
+  DBSize:
+      Type: String
+      Default: db.t2.micro
+      AllowedValues:
+        - db.t2.micro
+      Description: Database instance class
+      ConstraintDescription: Only Free Tier Available
+  PublicAlbAcmCertificate:
+      AllowedPattern: ^$|(arn:aws:acm:)([a-z0-9/:-])*([a-z0-9])$
+      Description: ' The AWS Certification Manager certificate ARN for the ALB certificate - this certificate should be created in the region you wish to run the ALB and must reference the WordPress domain name you use below.'
+      Type: String
+  WebAsgMax:
+      AllowedPattern: ^((?!0$)[1-2]?[0-9]|30)$
+      ConstraintDescription: Must be a number between 1 and 30.
+      Default: 4
+      Description: Specifies the maximum number of EC2 instances in the Web Autoscaling Group.
+      Type: String
+  WebAsgMin:
+      AllowedPattern: ^([0-0]?[0-9]|10)$
+      ConstraintDescription: Must be a number between 0 and 10.
+      Default: 2
+      Description: Specifies the minimum number of EC2 instances in the Web Autoscaling Group.
+      Type: String
+  EC2Size:
+      AllowedValues:
+          - t2.micro
+          - t2.small
+          - t2.large
+          - t3.micro
+          - t3.small
+          - t3.large
+          - t3a.micro
+          - t3a.small
+          - t3a.large
+      ConstraintDescription: Must be a valid Amazon EC2 instance type.
+      Default: t2.micro
+      Description: The Amazon EC2 instance type for your web instances.
+      Type: String
+  WPDomainName:
+      AllowedPattern: ^$|(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$
+      Description: 'The main domain name of the WordPress site (e.g. example.com).'
+      Type: String
+
+Rules:
+  SubnetInVPC:
+    Assertions:
+      - Assert: !EachMemberIn
+          - !ValueOfAll
+            - AWS::EC2::Subnet::Id
+            - VpcId
+          - !RefAll "AWS::EC2::VPC::Id"
+        AssertDescription: All subnets must in the VPC
+
+
+Conditions:
+
+  NumberOfSubnets1:
+      !Equals [ 1, !Ref NumberOfSubnets ]
+  NumberOfSubnets2:
+      !Equals [ 2, !Ref NumberOfSubnets ]
+  NumberOfSubnets3:
+      !Equals [ 3, !Ref NumberOfSubnets ]
+  NumberOfSubnets4:
+      !Equals [ 4, !Ref NumberOfSubnets ]
+  NumberOfSubnets5:
+      !Equals [ 5, !Ref NumberOfSubnets ]
+  NumberOfSubnets6:
+      !Equals [ 6, !Ref NumberOfSubnets ]
+  Subnet0: !Or
+    - !Condition NumberOfSubnets1
+    - !Condition NumberOfSubnets2
+    - !Condition NumberOfSubnets3
+    - !Condition NumberOfSubnets4
+    - !Condition NumberOfSubnets5
+    - !Condition NumberOfSubnets6
+  Subnet1: !Or
+    - !Condition NumberOfSubnets2
+    - !Condition NumberOfSubnets3
+    - !Condition NumberOfSubnets4
+    - !Condition NumberOfSubnets5
+    - !Condition NumberOfSubnets6
+  Subnet2: !Or
+    - !Condition NumberOfSubnets3
+    - !Condition NumberOfSubnets4
+    - !Condition NumberOfSubnets5
+    - !Condition NumberOfSubnets6
+  Subnet3: !Or
+    - !Condition NumberOfSubnets4
+    - !Condition NumberOfSubnets5
+    - !Condition NumberOfSubnets6
+  Subnet4: !Or
+    - !Condition NumberOfSubnets5
+    - !Condition NumberOfSubnets6
+  Subnet5: !Condition NumberOfSubnets6
+
+Resources:
+#######################
+## Security Groups
+  EfsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EFS mount targets
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+
+  EfsSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      FromPort: 2049
+      ToPort: 2049
+      SourceSecurityGroupId: !GetAtt EfsSecurityGroup.GroupId
+      GroupId: !GetAtt EfsSecurityGroup.GroupId
+
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ALB
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      VpcId:
+        !Ref VpcId
+
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+        GroupDescription: Security group for web instances
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 80
+            ToPort: 80
+            SourceSecurityGroupId: !Ref AlbSecurityGroup
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            SourceSecurityGroupId: !Ref AlbSecurityGroup
+        VpcId: !Ref VpcId
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+        GroupDescription: Security group for Amazon RDS cluster
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: !Ref WebServerSecurityGroup
+        VpcId: !Ref VpcId
+
+
+#####################
+## EFS
+  ElasticFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      PerformanceMode: !Ref PerformanceMode
+
+  ElasticFileSystemMountTarget0:
+    Condition: Subnet0
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref ElasticFileSystem
+      SecurityGroups:
+      - !Ref EfsSecurityGroup
+      SubnetId: !Select [ 0, !Ref Subnet ]
+
+  ElasticFileSystemMountTarget1:
+    Condition: Subnet1
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref ElasticFileSystem
+      SecurityGroups:
+      - !Ref EfsSecurityGroup
+      SubnetId: !Select [ 1, !Ref Subnet ]
+
+  ElasticFileSystemMountTarget2:
+    Condition: Subnet2
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref ElasticFileSystem
+      SecurityGroups:
+      - !Ref EfsSecurityGroup
+      SubnetId: !Select [ 2, !Ref Subnet ]
+
+  ElasticFileSystemMountTarget3:
+    Condition: Subnet3
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref ElasticFileSystem
+      SecurityGroups:
+      - !Ref EfsSecurityGroup
+      SubnetId: !Select [ 3, !Ref Subnet ]
+
+  ElasticFileSystemMountTarget4:
+    Condition: Subnet4
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref ElasticFileSystem
+      SecurityGroups:
+      - !Ref EfsSecurityGroup
+      SubnetId: !Select [ 4, !Ref Subnet ]
+
+  ElasticFileSystemMountTarget5:
+    Condition: Subnet5
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref ElasticFileSystem
+      SecurityGroups:
+      - !Ref EfsSecurityGroup
+      SubnetId: !Select [ 5, !Ref Subnet ]
+
+###########################
+## RDS
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: mySubnetgroup
+      DBSubnetGroupDescription:
+        Fn::Join:
+        - ''
+        - - 'RDS Subnet Group for '
+          - Ref: AWS::StackName
+      SubnetIds:
+      - Ref: PrivateSubnet1
+      - Ref: PrivateSubnet2
+
+  DB:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    Properties:
+        AllocatedStorage: "5"
+        StorageType: gp2
+        DBInstanceClass: !Ref DBSize
+        DBName: !Ref DatabaseName
+        Engine: MySQL
+        MasterUsername: !Ref DatabaseUser
+        MasterUserPassword: !Ref DatabasePassword
+        VPCSecurityGroups:
+            - !Ref DatabaseSecurityGroup
+        DBSubnetGroupName: !Ref DbSubnetGroup
+        MultiAZ: !Ref MultiAvailabilityZone
+    DependsOn:
+        - DbSubnetGroup
+
+################################
+## ALB
+  PublicAlbListenerNoSslCertificate:
+    Type : AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+       - Type: "redirect"
+         RedirectConfig:
+           Protocol: "HTTPS"
+           Port: "443"
+           Host: "#{host}"
+           Path: "/#{path}"
+           Query: "#{query}"
+           StatusCode: "HTTP_301"
+      LoadBalancerArn: !Ref PublicApplicationLoadBalancer
+      Port: 80
+      Protocol: "HTTP"
+
+  PublicAlbListenerSslCertificate:
+    Type : AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Certificates:
+      - CertificateArn: !Ref PublicAlbAcmCertificate
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref PublicAlbTargetGroup
+      LoadBalancerArn: !Ref PublicApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+
+  PublicApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Subnets: !Ref Subnet
+      LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: "60"
+      SecurityGroups:
+      - !Ref AlbSecurityGroup
+      Tags:
+      - Key: Name
+        Value: !Join [ '', [ 'Public ALB / ', !Ref 'AWS::StackName' ] ]
+
+  PublicAlbTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /wp-login.php
+      HealthCheckTimeoutSeconds: 5
+      Port: 80
+      Protocol: HTTP
+      Tags:
+      - Key: Name
+        Value: !Join [ '', [ 'Public ALB / ', !Ref 'AWS::StackName' ] ]
+      UnhealthyThresholdCount: 5
+      VpcId: !Ref VpcId
+
+##################################
+## EC2 ASG
+  rEc2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref rEc2Role
+  rEc2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
+      Path: /
+
+  WebServerGroup:
+      Type: AWS::AutoScaling::AutoScalingGroup
+      Properties:
+        VPCZoneIdentifier: !Ref Subnet
+        LaunchConfigurationName: !Ref LaunchConfig
+        MaxSize: !Ref WebAsgMax
+        MinSize: !Ref WebAsgMin
+        TargetGroupARNs:
+          - !Ref PublicAlbTargetGroup
+      CreationPolicy:
+        ResourceSignal:
+          Count: !Ref WebAsgMin
+          Timeout: PT15M
+      UpdatePolicy:
+        AutoScalingRollingUpdate:
+          MinInstancesInService: 1
+          MaxBatchSize: 1
+          PauseTime: PT15M
+          WaitOnResourceSignals: true
+
+  LaunchConfig:
+      Type: AWS::AutoScaling::LaunchConfiguration
+      Metadata:
+        'AWS::CloudFormation::Init':
+          configSets:
+            wordpress:
+              - "configure_cfn"
+              - "install_wordpress"
+              - "config_wordpress"
+          configure_cfn:
+            files:
+              /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+                content: !Sub |
+                  [cfn-auto-reloader-hook]
+                  triggers=post.update
+                  path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init
+                  action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchConfig --configsets wordpress --region ${AWS::Region}
+                mode: "000400"
+                owner: root
+                group: root
+              /etc/cfn/cfn-hup.conf:
+                content: !Sub |
+                  [main]
+                  stack=${AWS::StackId}
+                  region=${AWS::Region}
+                  verbose=true
+                  interval=5
+                mode: "000400"
+                owner: root
+                group: root
+            services:
+              sysvinit:
+                cfn-hup:
+                  enabled: "true"
+                  ensureRunning: "true"
+                  files:
+                    - "/etc/cfn/cfn-hup.conf"
+                    - "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+          install_wordpress:
+            packages:
+              yum:
+                httpd24: []
+                php70: []
+                mysql: []
+                php70-mysqlnd: []
+            sources:
+              /var/www/html: "http://wordpress.org/latest.tar.gz"
+            services:
+              sysvinit:
+                httpd:
+                  enabled: "true"
+                  ensureRunning: "true"
+          config_wordpress:
+            commands:
+              01_clone_config:
+                cwd: "/var/www/html"
+                command: !Sub |
+                    cd /var/www/html
+                    cp -r wordpress/* /var/www/html/
+                    rm -rf wordpress
+                    rm -rf latest.tar.gz
+                    cp wp-config-sample.php wp-config.php
+              02_inject_dbhost:
+                cwd: "/var/www/html"
+                command: !Sub |
+                  sed -i 's/localhost/${DB.Endpoint.Address}/g' wp-config.php
+              03_inject_dbname:
+                cwd: "/var/www/html"
+                command: !Sub |
+                  sed -i 's/database_name_here/${DatabaseName}/g' wp-config.php
+              04_inject_dbuser:
+                cwd: "/var/www/html"
+                command: !Sub |
+                  sed -i 's/username_here/${DatabaseUser}/g' wp-config.php
+              05_inject_dbpassword:
+                cwd: "/var/www/html"
+                command: !Sub |
+                  sed -i 's/password_here/${DatabasePassword}/g' wp-config.php
+              06_wordpress_permissions:
+                cwd: "/var/www/html"
+                command: !Sub |
+                  chmod -R 755 wp-content
+                  chown -R apache:apache wp-content
+                  chown -R apache /var/www
+                  chgrp -R apache /var/www
+                  service httpd restart
+              07_inject_sslconnection:
+                cwd: "/var/www/html"
+                command: !Sub |
+                  cd /var/www/html
+                  sed -i "15s#.*#*/#" wp-config.php
+                  sed -i "16s#.*#define('WP_HOME','https://${WPDomainName}');#" wp-config.php
+                  sed -i "17s#.*#define('WP_SITEURL','https://${WPDomainName}');#" wp-config.php
+                  sed -i "18s#.*#if (strpos($_SERVER['HTTP_X_FORWARDED_PROTO'], 'https') !== false)#" wp-config.php
+                  sed -i "19s#.*#       \$_SERVER['HTTPS']='on';#" wp-config.php
+      Properties:
+        IamInstanceProfile: !Ref rEc2InstanceProfile
+        ImageId: !Ref LatestAmiId
+        InstanceType: !Ref EC2Size
+        SecurityGroups:
+          - !Ref WebServerSecurityGroup
+        UserData:
+          "Fn::Base64":
+            !Sub |
+              #!/bin/bash
+              yum update -y aws-cfn-bootstrap
+              yum install -y amazon-efs-utils
+              mkdir -p /var/www/html
+              echo "${ElasticFileSystem}.efs.${AWS::Region}.amazonaws.com:/ /var/www/html nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport,_netdev 0 0" >> /etc/fstab
+              mount -a
+              # mount -t efs ${ElasticFileSystem}.efs.${AWS::Region}.amazonaws.com:/ /var/www/html
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchConfig --configsets wordpress --region ${AWS::Region}
+              yum -y update
+              /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackId} --resource AutoScalingGroup --region ${AWS::Region}
+
+################################
+# ROUTE53
+
+  RecordSet:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneName: !Join ['', [!Ref WPDomainName, '.']]
+      RecordSets:
+      - Name: !Join ['', [ !Ref WPDomainName, '.']]
+        Type: A
+        AliasTarget:
+          DNSName: !GetAtt  PublicApplicationLoadBalancer.DNSName
+          EvaluateTargetHealth: True
+          HostedZoneId: 'Z2FDTNDATAQYW2'
+
