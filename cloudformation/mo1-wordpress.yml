@@ -37,6 +37,7 @@ Metadata:
         default: Web Tier
       Parameters:
         - LatestAmiId
+        - pVolumeSize
         - PublicAlbAcmCertificate
         - EC2Size
         - WebAsgMax
@@ -76,6 +77,8 @@ Metadata:
         default: Subnets
       LatestAmiId:
         default: Latest AWS Linux 2 AMI
+      pVolumeSize:
+        default: Volume Size
 
 Parameters:
 
@@ -181,6 +184,11 @@ Parameters:
       AllowedPattern: ^$|(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$
       Description: 'The main domain name of the WordPress site (e.g. example.com).'
       Type: String
+  pVolumeSize:
+    Description: Enter the number of GBs you want your volume to be.
+    Type: Number
+    Default: 100
+    MinValue: 8
 
 Rules:
   SubnetInVPC:
@@ -489,6 +497,7 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       #checkov:skip=CKV_AWS_21:Ensure the S3 bucket has versioning enabled
+      #checkov:skip=CKV_AWS_18:Ensure the S3 bucket has access logging enabled
       AccessControl: "LogDeliveryWrite"
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -683,6 +692,11 @@ Resources:
         IamInstanceProfile: !Ref rEc2InstanceProfile
         ImageId: !Ref LatestAmiId
         InstanceType: !Ref EC2Size
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: !Ref pVolumeSize
+              Encrypted: true
         SecurityGroups:
           - !Ref WebServerSecurityGroup
         UserData:
