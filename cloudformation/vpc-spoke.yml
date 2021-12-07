@@ -16,6 +16,7 @@ Metadata:
           - pVPCCidr
           - pVPCTenancy
           - pNumberOfAzs
+          - pTgwId
       - Label:
           default: Tagging
         Parameters:
@@ -33,6 +34,8 @@ Metadata:
         default: CloudFormation Template Version
       pNumberOfAzs:
         default: Number of AZs to use
+      pTgwId:
+        default: Transit Gateway ID
 
 Parameters:
 
@@ -78,6 +81,10 @@ Parameters:
     AllowedValues:
       - "2"
       - "3"
+
+  pTgwId:
+    Type: String
+    Description: The ID of the transit gateway.
 
 Conditions:
   3AZDeployment: !Equals [!Ref pNumberOfAzs, "3"]
@@ -154,32 +161,52 @@ Resources:
       RouteTableId: !Ref rRouteTable
       SubnetId: !Ref rSubnetC
 
-  # rVpnGateway:
-  #   Type: AWS::EC2::VPNGateway
-  #   Properties:
-  #     AmazonSideAsn: 64513
-  #     Type: ipsec.1
-  #     Tags:
-  #     - Key: Name
-  #       Value: !Sub '${pVPCName} VPN Gateway'
-  #     - Key: transitvpc:spoke
-  #       Value: 'true'
-  # rAttachVpnGateway:
-  #   Type: AWS::EC2::VPCGatewayAttachment
-  #   Properties:
-  #     VpcId: !Ref rVpc
-  #     VpnGatewayId: !Ref rVpnGateway
-  # rRoute0:
-  #   Type: AWS::EC2::Route
-  #   DependsOn: rAttachVpnGateway
-  #   Properties:
-  #     DestinationCidrBlock: 0.0.0.0/0
-  #     GatewayId: !Ref rVpnGateway
-  #     RouteTableId: !Ref rRouteTable
-
   ####################################
   ## STAGED VPC RESOURCES
   ###################################
+  ## SSM ENdpoints
+  SSMEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref rInterfaceVpcEndpointSG
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssm"
+      SubnetIds:
+        - !Ref rSubnetA
+        - !Ref rSubnetB
+        - !If [3AZDeployment ,!Ref rSubnetC, !Ref "AWS::NoValue"]
+      VpcEndpointType: 'Interface'
+      VpcId: !Ref rVpc
+
+  SSMMessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref rInterfaceVpcEndpointSG
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssmmessages"
+      SubnetIds:
+        - !Ref rSubnetA
+        - !Ref rSubnetB
+        - !If [3AZDeployment ,!Ref rSubnetC, !Ref "AWS::NoValue"]
+      VpcEndpointType: 'Interface'
+      VpcId: !Ref rVpc
+
+  EC2MessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref rInterfaceVpcEndpointSG
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ec2messages"
+      SubnetIds:
+        - !Ref rSubnetA
+        - !Ref rSubnetB
+        - !If [3AZDeployment ,!Ref rSubnetC, !Ref "AWS::NoValue"]
+      VpcEndpointType: Interface
+      VpcId: !Ref rVpc
+
   ## ECR API Endpoint for VPC utilization
   rEcrApiVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -240,7 +267,6 @@ Resources:
       VpcEndpointType: Interface
       VpcId: !Ref rVpc
 
-
   ## S3 Endpoint for VPC utilization
   rS3VPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -273,7 +299,7 @@ Resources:
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.dynamodb'
       VpcId: !Ref rVpc
 
-  ## RDS Subnet Group staged in the 2 created Subets
+  ## RDS Subnet Group staged in the 2 created Subnets
   rRDSSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
@@ -338,11 +364,11 @@ Resources:
           ToPort: 443
           CidrIp: !Ref pVPCCidr
           Description: Local VPC CIDR
-        # - IpProtocol: tcp
-        #   FromPort: 443
-        #   ToPort: 443
-        #   CidrIp:
-        #   Description: VDSS Internal
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/16
+          Description: VDSS Internal
 
   rApiVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -358,6 +384,23 @@ Resources:
       VpcEndpointType: Interface
       VpcId: !Ref rVpc
 
+  rTgwAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId: !Ref pTgwId
+      VpcId: !Ref rVpc
+      SubnetIds:
+        - !Ref rSubnetA
+        - !Ref rSubnetB
+        - !If [3AZDeployment ,!Ref rSubnetC, !Ref "AWS::NoValue"]
+  ## Route for Transit Gateway
+  rRoute0:
+    Type: AWS::EC2::Route
+    DependsOn: rTgwAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      TransitGatewayId: !Ref pTgwId
+      RouteTableId: !Ref rRouteTable
 Outputs:
   oVpc:
     Description: VPC ID
