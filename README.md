@@ -21,4 +21,6 @@ The following details the network CIDRs for the VPCs within the solution:
 | On-Premises | On-Premises VPC | 192.168.0.0/16 |
 | VDSS | VDSS Stack | 10.0.0.0/16 |
 | VDMS | VDMS Stack | 10.1.0.0/16 |
-| MO1 Prod | Mission Owner 1 Production|  10.5.0.0/16 |
+| MO1 Prod | Mission Owner 1 Production |  10.5.0.0/16 |
+| MO1 Test | Mission Owner 1 Test |  10.6.0.0/16 |
+| MO1 Dev | Mission Owner 1 Development |  10.7.0.0/16 |
