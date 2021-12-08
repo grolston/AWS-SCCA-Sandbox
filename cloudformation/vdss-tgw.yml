@@ -12,6 +12,8 @@ Metadata: # Metadata Section
       - pDefaultRouteTablePropagation
       - pDnsSupport
       - pVpnEcmpSupport
+      - pManagementAccountId
+      - pOrganizationId
 
     ParameterLabels:
       pAmazonAsn:
@@ -26,6 +28,10 @@ Metadata: # Metadata Section
         default: DNS Support
       pVpnEcmpSupport:
         default: Equal Cost Multipath Protocol
+      pManagementAccountId:
+        default: Management Account ID
+      pOrganizationId:
+        default: Organization ID
 
 Parameters:
   pAmazonAsn:
@@ -75,6 +81,12 @@ Parameters:
     AllowedValues:
       - "enable"
       - "disable"
+  pManagementAccountId:
+    Type: String
+    Description: AWS Management Account ID
+  pOrganizationId:
+    Type: String
+    Description: AWS Organization ID
 
 Resources:
   rTransitGateway:
@@ -90,6 +102,19 @@ Resources:
         - Key: Name
           Value: 'VDSS TGW'
       VpnEcmpSupport: !Ref pVpnEcmpSupport
+
+  TGWResourceAccessShare:
+    Type: AWS::RAM::ResourceShare
+    Properties:
+      AllowExternalPrincipals: false
+      Name: "Transit Gateway AB3 Share"
+      ResourceArns:
+        - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:transit-gateway/${rTransitGateway}"
+      Principals:
+        - !Sub "arn:${AWS::Partition}:organizations::${pManagementAccountId}:organization/${pOrganizationId}"
+      Tags:
+          - Key: "Name"
+            Value: "AB3 Org"
 
 Outputs:
   oTransitGatewayId:
