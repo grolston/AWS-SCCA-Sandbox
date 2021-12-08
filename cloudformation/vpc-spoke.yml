@@ -379,24 +379,24 @@ Resources:
       VpcEndpointType: Interface
       VpcId: !Ref rVpc
 
-  rTgwAttachment:
-    Type: AWS::EC2::TransitGatewayAttachment
-    Properties:
-      TransitGatewayId: !Ref pTgwId
-      VpcId: !Ref rVpc
-      SubnetIds:
-        - !Ref rSubnetA
-        - !Ref rSubnetB
-        - !If [3AZDeployment ,!Ref rSubnetC, !Ref "AWS::NoValue"]
+  # rTgwAttachment:
+  #   Type: AWS::EC2::TransitGatewayAttachment
+  #   Properties:
+  #     TransitGatewayId: !Ref pTgwId
+  #     VpcId: !Ref rVpc
+  #     SubnetIds:
+  #       - !Ref rSubnetA
+  #       - !Ref rSubnetB
+  #       - !If [3AZDeployment ,!Ref rSubnetC, !Ref "AWS::NoValue"]
 
-  ## Route for Transit Gateway
-  rRoute0:
-    Type: AWS::EC2::Route
-    DependsOn: rTgwAttachment
-    Properties:
-      DestinationCidrBlock: 0.0.0.0/0
-      TransitGatewayId: !Ref pTgwId
-      RouteTableId: !Ref rRouteTable
+  # ## Route for Transit Gateway
+  # rRoute0:
+  #   Type: AWS::EC2::Route
+  #   DependsOn: rTgwAttachment
+  #   Properties:
+  #     DestinationCidrBlock: 0.0.0.0/0
+  #     TransitGatewayId: !Ref pTgwId
+  #     RouteTableId: !Ref rRouteTable
 
 Outputs:
   oVpc:
