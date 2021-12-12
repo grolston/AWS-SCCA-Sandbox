@@ -3,10 +3,6 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: AB3 HA WordPress
 
 Metadata:
-
-   Authors:
-    Description: https://github.com/lzrocha
-
    AWS::CloudFormation::Interface:
     ParameterGroups:
     - Label:
@@ -100,7 +96,7 @@ Parameters:
       - 4
       - 5
       - 6
-      Default: 3
+      Default: 2
       Description: Number of subnets. This must match your selections in the list of Subnets below.
       Type: String
   PerformanceMode:
@@ -144,13 +140,14 @@ Parameters:
       Type: String
   DBSize:
       Type: String
-      Default: db.t2.micro
+      Default: db.t2.small
       AllowedValues:
         - db.t2.micro
+        - db.t2.small
+        - db.m1.small
       Description: Database instance class
       ConstraintDescription: Only Free Tier Available
   PublicAlbAcmCertificate:
-      AllowedPattern: ^$|(arn:aws:acm:)([a-z0-9/:-])*([a-z0-9])$
       Description: ' The AWS Certification Manager certificate ARN for the ALB certificate - this certificate should be created in the region you wish to run the ALB and must reference the WordPress domain name you use below.'
       Type: String
   WebAsgMax:
@@ -177,7 +174,7 @@ Parameters:
           - t3a.small
           - t3a.large
       ConstraintDescription: Must be a valid Amazon EC2 instance type.
-      Default: t2.micro
+      Default: t2.small
       Description: The Amazon EC2 instance type for your web instances.
       Type: String
   WPDomainName:
@@ -467,10 +464,10 @@ Resources:
       Scheme: internet-facing
       Subnets: !Ref Subnet
       LoadBalancerAttributes:
-        - Key: access_logs.s3.enabled
-          Value: "true"
-        - Key: access_logs.s3.bucket
-          Value: !Ref ALBAccessLogsBucket
+        # - Key: access_logs.s3.enabled
+        #   Value: "true"
+        # - Key: access_logs.s3.bucket
+        #   Value: !Ref ALBAccessLogsBucket
         - Key: idle_timeout.timeout_seconds
           Value: "60"
       SecurityGroups:
@@ -493,58 +490,57 @@ Resources:
       UnhealthyThresholdCount: 5
       VpcId: !Ref VpcId
 
-  ALBAccessLogsBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      #checkov:skip=CKV_AWS_21:Ensure the S3 bucket has versioning enabled
-      #checkov:skip=CKV_AWS_18:Ensure the S3 bucket has access logging enabled
-      AccessControl: "LogDeliveryWrite"
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      BucketName: !Sub "mo1-wp-alb-logs-${AWS::AccountId}"
-      # LoggingConfiguration:
-      #   LogFilePrefix: access-logs
-      LifecycleConfiguration:
-        Rules:
-          - ExpirationInDays: 28
-            Id: ExpirationInDays28
-            Status: Enabled
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
+  # ALBAccessLogsBucket:
+  #   Type: AWS::S3::Bucket
+  #   Properties:
+  #     #checkov:skip=CKV_AWS_21:Ensure the S3 bucket has versioning enabled
+  #     #checkov:skip=CKV_AWS_18:Ensure the S3 bucket has access logging enabled
+  #     AccessControl: "LogDeliveryWrite"
+  #     BucketEncryption:
+  #       ServerSideEncryptionConfiguration:
+  #         - ServerSideEncryptionByDefault:
+  #             SSEAlgorithm: AES256
+  #     BucketName: !Sub "mo1-wp-alb-logs-${AWS::AccountId}"
+  #     # LoggingConfiguration:
+  #     #   LogFilePrefix: access-logs
+  #     LifecycleConfiguration:
+  #       Rules:
+  #         - ExpirationInDays: 28
+  #           Id: ExpirationInDays28
+  #           Status: Enabled
+  #     PublicAccessBlockConfiguration:
+  #       BlockPublicAcls: true
+  #       BlockPublicPolicy: true
+  #       IgnorePublicAcls: true
+  #       RestrictPublicBuckets: true
 
-  ALBAccessLogsBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref "ALBAccessLogsBucket"
-      PolicyDocument:
-        Statement:
-          - Action:
-              - s3:PutObject
-            Effect: Allow
-            Principal:
-              AWS: ## GovCloud Logging Account west
-                - 048591011584
-            Resource:
-              - !Sub "${ALBAccessLogsBucket.Arn}/AWSLogs/${AWS::AccountId}/*"
-          - Action:
-              - s3:GetBucketAcl
-            Effect: Allow
-            Principal:
-              Service: delivery.logs.amazonaws.com
-            Resource:
-              - !Sub "${ALBAccessLogsBucket.Arn}"
-          - Action:
-              - s3:PutObject
-            Effect: Allow
-            Principal:
-              Service: delivery.logs.amazonaws.com
-            Resource:
-              - !Sub "${ALBAccessLogsBucket.Arn}/AWSLogs/${AWS::AccountId}/*"
+  # ALBAccessLogsBucketPolicy:
+  #   Type: AWS::S3::BucketPolicy
+  #   Properties:
+  #     Bucket: !Ref "ALBAccessLogsBucket"
+  #     PolicyDocument:
+  #       Statement:
+  #         - Action:
+  #             - s3:PutObject
+  #           Effect: Allow
+  #           Principal:
+  #             AWS: "048591011584"
+  #           Resource:
+  #             - !Sub "${ALBAccessLogsBucket.Arn}/AWSLogs/${AWS::AccountId}/*"
+  #         - Action:
+  #             - s3:GetBucketAcl
+  #           Effect: Allow
+  #           Principal:
+  #             Service: delivery.logs.amazonaws.com
+  #           Resource:
+  #             - !Sub "${ALBAccessLogsBucket.Arn}"
+  #         - Action:
+  #             - s3:PutObject
+  #           Effect: Allow
+  #           Principal:
+  #             Service: delivery.logs.amazonaws.com
+  #           Resource:
+  #             - !Sub "${ALBAccessLogsBucket.Arn}/AWSLogs/${AWS::AccountId}/*"
 
 ##################################
 ## EC2 ASG
@@ -564,6 +560,16 @@ Resources:
             Principal:
               Service: ec2.amazonaws.com
             Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ASG
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:SignalResource
+                Resource: "*"
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
@@ -632,12 +638,6 @@ Resources:
                     - "/etc/cfn/cfn-hup.conf"
                     - "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
           install_wordpress:
-            packages:
-              yum:
-                httpd24: []
-                php70: []
-                mysql: []
-                php70-mysqlnd: []
             sources:
               /var/www/html: "http://wordpress.org/latest.tar.gz"
             services:
@@ -703,28 +703,36 @@ Resources:
           "Fn::Base64":
             !Sub |
               #!/bin/bash
+              amazon-linux-extras install epel -y
               yum update -y aws-cfn-bootstrap
               yum install -y amazon-efs-utils
+              yum install yum-utils -y
+              yum-config-manager --enable remi-php70
+              yum install php-mysqlnd -y
+              amazon-linux-extras install php7.2 -y
+              yum install mysql -y
+              yum install -y httpd.x86_64
               mkdir -p /var/www/html
               echo "${ElasticFileSystem}.efs.${AWS::Region}.amazonaws.com:/ /var/www/html nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport,_netdev 0 0" >> /etc/fstab
               mount -a
               # mount -t efs ${ElasticFileSystem}.efs.${AWS::Region}.amazonaws.com:/ /var/www/html
               /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchConfig --configsets wordpress --region ${AWS::Region}
-              yum -y update
-              /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackId} --resource AutoScalingGroup --region ${AWS::Region}
-
+              ls
+              /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackId} --resource WebServerGroup --region ${AWS::Region}
+              systemctl start  httpd
+              systemctl enable httpd
 ################################
 # ROUTE53
 
-  RecordSet:
-    Type: AWS::Route53::RecordSetGroup
-    Properties:
-      HostedZoneName: !Join ['', [!Ref WPDomainName, '.']]
-      RecordSets:
-      - Name: !Join ['', [ !Ref WPDomainName, '.']]
-        Type: A
-        AliasTarget:
-          DNSName: !GetAtt  PublicApplicationLoadBalancer.DNSName
-          EvaluateTargetHealth: True
-          HostedZoneId: 'Z2FDTNDATAQYW2'
+  # RecordSet:
+  #   Type: AWS::Route53::RecordSetGroup
+  #   Properties:
+  #     HostedZoneName: !Join ['', [!Ref WPDomainName, '.']]
+  #     RecordSets:
+  #     - Name: !Join ['', [ !Ref WPDomainName, '.']]
+  #       Type: A
+  #       AliasTarget:
+  #         DNSName: !GetAtt  PublicApplicationLoadBalancer.DNSName
+  #         EvaluateTargetHealth: True
+  #         HostedZoneId: 'Z2FDTNDATAQYW2'
 
