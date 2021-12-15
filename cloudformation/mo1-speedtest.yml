@@ -1,0 +1,361 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Creates ASG with Specified Min, Max, and desired capacity in each specified subnet"
+
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: Network configuration
+        Parameters:
+          - pVpc
+          - pVPCZoneIdentifier
+      - Label:
+          default: Auto Scaling Configs
+        Parameters:
+          - pMaxSizeASG
+          - pMinSizeASG
+          - pDesiredCapacityASG
+      - Label:
+          default: Amazon EC2 configuration
+        Parameters:
+          - pOperatingSystem
+          - pTagNameValue
+          - pVolumeSize
+          - pBootstrapUrl
+          - pInstanceType
+      - Label:
+          default: EC2 User Configs
+        Parameters:
+          - pAddEc2User
+          - pEc2User
+          - pEc2UserPassword
+
+    ParameterLabels:
+      pVpc:
+        default: VPC
+      pVolumeSize:
+        default: Volume Size
+      pMaxSizeASG:
+        default: Max Size of ASG
+      pMinSizeASG:
+        default: Minimum Size of ASG
+      pDesiredCapacityASG:
+        default: Desired Capacity of ASG
+      pVPCZoneIdentifier:
+        default: VPC Zone Identifier
+      pTagNameValue:
+        default: Name Tag Value
+      pBootstrapUrl:
+        default: Boot Strap URL
+      pOperatingSystem:
+        default: Operating System (do not change)
+      pInstanceType:
+        default: Instance Type
+      pEc2User:
+        default: EC2 User
+      pEc2UserPassword:
+        default: Password
+      pAddEc2User:
+        default: Add EC2 User
+
+Parameters:
+  pMaxSizeASG:
+    Description: "Enter the Max Size for the ASG"
+    Type: Number
+    Default: 1
+  pMinSizeASG:
+    Description: "Enter the Min Size for the ASG"
+    Type: Number
+    Default: 1
+  pDesiredCapacityASG:
+    Description: "Enter the desired capacity for the ASG"
+    Type: Number
+    Default: 1
+  pVPCZoneIdentifier:
+    Description: "List the Subnet Ids of the instances"
+    Type: List<AWS::EC2::Subnet::Id>
+  pOperatingSystem:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-ebs"
+  pVolumeSize:
+    Description: Enter the number of GBs you want your volume to be.
+    Type: Number
+    Default: 100
+    MinValue: 8
+  pBootstrapUrl:
+    Type: String
+    Description: URL to download and execute a bash script. This field is not required.
+  pTagNameValue:
+    Description: "Required: Enter the tag name you'd like applied to the instances. Tag Name gives the name to the EC2 instance."
+    Type: String
+    MinLength: 1
+  pVpc:
+    Description: The VPC to launch the EC2 instance in to.
+    Type: AWS::EC2::VPC::Id
+  pInstanceType:
+    Description: Instance type of EC2
+    Type: String
+    Default: "t3.micro"
+    AllowedValues:
+      - "t3.micro"
+      - "t3.small"
+      - "t3a.micro"
+      - "t3a.small"
+  pAlbSubnets:
+      Description: The Subnet ID of existing subnets.
+      Type: List<AWS::EC2::Subnet::Id>
+      ConstraintDescription: It is recommended to include all available subnets.
+
+  pEc2User:
+    Description: "EC2 Username"
+    Type: String
+    MinLength: 1
+  pEc2UserPassword:
+    Description: "EC2 User Password"
+    Type: String
+    NoEcho: true
+    AllowedPattern : "^[a-zA-Z0-9]*$"
+    MinLength: 0
+    MaxLength: 41
+  pAddEc2User:
+    Description: Allow an EC2 user to be created for EC2 console access
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+  PublicAlbAcmCertificate:
+      Description: ' The AWS Certification Manager certificate ARN for the ALB certificate - this certificate should be created in the region you wish to run the ALB and must reference the WordPress domain name you use below.'
+      Type: String
+
+
+Rules:
+  SubnetInVPC:
+    Assertions:
+      - Assert: !EachMemberIn
+          - !ValueOfAll
+            - AWS::EC2::Subnet::Id
+            - VpcId
+          - !RefAll "AWS::EC2::VPC::Id"
+        AssertDescription: All subnets must in the VPC
+
+Conditions:
+  cUseBootstrapUrl: !Not [!Equals ["", !Ref pBootstrapUrl]]
+  cAddEc2User: !Equals ["true", !Ref pAddEc2User]
+
+Resources:
+
+################################
+## ALB
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for speedtest ALB
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Web traffic access to ALB
+        - IpProtocol: tcp
+          FromPort: 8
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access to ALB for redirection
+      SecurityGroupEgress:
+        - Description: Outbound unrestricted traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref pVpc
+
+  PublicAlbListenerNoSslCertificate:
+    Type : AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+       - Type: "redirect"
+         RedirectConfig:
+           Protocol: "HTTPS"
+           Port: "443"
+           Host: "#{host}"
+           Path: "/#{path}"
+           Query: "#{query}"
+           StatusCode: "HTTP_301"
+      LoadBalancerArn: !Ref PublicApplicationLoadBalancer
+      Port: 80
+      Protocol: "HTTP"
+
+  PublicAlbListenerSslCertificate:
+    Type : AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Certificates:
+      - CertificateArn: !Ref PublicAlbAcmCertificate
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref PublicAlbTargetGroup
+      LoadBalancerArn: !Ref PublicApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+
+  PublicApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internal
+      Subnets: !Ref pAlbSubnets
+      LoadBalancerAttributes:
+        # - Key: access_logs.s3.enabled
+        #   Value: "true"
+        # - Key: access_logs.s3.bucket
+        #   Value: !Ref ALBAccessLogsBucket
+        - Key: idle_timeout.timeout_seconds
+          Value: "60"
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Join [ '', [ 'Public ALB / ', !Ref 'AWS::StackName' ] ]
+
+  PublicAlbTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /
+      HealthCheckTimeoutSeconds: 5
+      Port: 80
+      Protocol: HTTP
+      Tags:
+      - Key: Name
+        Value: !Join [ '', [ 'Public ALB / ', !Ref 'AWS::StackName' ] ]
+      UnhealthyThresholdCount: 5
+      VpcId: !Ref pVpc
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT10M
+    Properties:
+      TargetGroupARNs:
+          - !Ref PublicAlbTargetGroup
+      AutoScalingGroupName: !Sub "asg-${AWS::StackName}"
+      LaunchConfigurationName: !Ref LaunchConfig
+      Cooldown: '120'
+      DesiredCapacity: !Ref pDesiredCapacityASG
+      MaxSize: !Ref pMaxSizeASG
+      MinSize: !Ref pMinSizeASG
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}
+          PropagateAtLaunch: true
+      VPCZoneIdentifier: !Ref pVPCZoneIdentifier
+
+  LaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: !Ref pOperatingSystem
+      SecurityGroups:
+        - !Ref rSecurityGroupDefault
+      InstanceType: !Ref pInstanceType
+      IamInstanceProfile: !Ref rec2InstanceProfile
+      LaunchConfigurationName: !Sub "lc-${AWS::StackName}"
+      MetadataOptions:
+        HttpEndpoint: 'enabled'
+        HttpTokens: 'required'
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref pVolumeSize
+            Encrypted: true
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            # Get the latest CloudFormation package
+            yum update -y aws-cfn-bootstrap
+            yum install docker -y
+            systemctl enable docker.service
+            systemctl start docker.service
+            docker run -e MODE=standalone -e TELEMETRY=true -e ENABLE_ID_OBFUSCATION=true -e PASSWORD="DemoPasswordHere" -e WEBPORT=80 -p 80:80 -d adolfintel/speedtest
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackId} --resource AutoScalingGroup --region ${AWS::Region}
+            ${addEc2User}
+            ${curlUrl}
+          - {
+              curlUrl:
+                !If [cUseBootstrapUrl, !Sub "curl -fsS ${pBootstrapUrl} | bash", "", ],
+              addEc2User:
+                !If [cAddEc2User, !Sub 'adduser ${pEc2User} ; echo "${pEc2User}:${pEc2UserPassword}" | chpasswd', "", ],
+            }
+
+  rSecurityGroupDefault:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: This default security group is purposely open to the world for egress for ease of adoption.
+          - id: W29
+            reason: This default security group is purposely open on all ports for egress for ease of adoption.
+    Properties:
+      GroupDescription: !Sub "Default SG for SC Product ${pTagNameValue} "
+      VpcId: !Ref pVpc
+      SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 80
+            ToPort: 80
+            SourceSecurityGroupId: !Ref AlbSecurityGroup
+            Description: ALB to Web server network access
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            SourceSecurityGroupId: !Ref AlbSecurityGroup
+            Description: ALB to Web server network access
+      SecurityGroupEgress:
+        - Description: Outbound unrestricted traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Ref pTagNameValue
+
+  rEc2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:  !Sub "ep-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: ASG
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:SignalResource
+                Resource: "*"
+      ManagedPolicyArns:
+      - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
+
+  rec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "ep-${AWS::StackName}"
+      Path: /
+      Roles:
+        - !Ref rEc2Role
+
+Outputs:
+  AutoscalingGroup:
+    Description: "The newly created asg"
+    Value:
+      Ref: "AutoScalingGroup"
+  LaunchConfig:
+    Description: "the newly created launch config"
+    Value:
+      Ref: "LaunchConfig"

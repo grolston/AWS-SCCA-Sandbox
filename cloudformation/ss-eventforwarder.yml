@@ -1,0 +1,68 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Log Archive Event Center Forwarding
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Event Center Bus
+        Parameters:
+          - pEventCenterEventBusArn
+
+    ParameterLabels:
+      pEventCenterEventBusArn:
+        default: Central Event Bus ARN
+
+Parameters:
+  pEventCenterEventBusArn:
+    Type: String
+    Description: The default event bus ARN deployed for event center. Example - arn:aws:events:us-east-1:123456789123:event-bus/default
+
+Resources:
+
+  rEventCenterRuleExecRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: "Role name given to help associate solution with resource"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+            - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+              - events.amazonaws.com
+      Path: "/"
+      Policies:
+        - PolicyName: "PublishEvent"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "events:PutEvents"
+                Resource: !Sub "${pEventCenterEventBusArn}/*"
+
+  ####################
+  ##    EVENT RULES
+  ####################
+
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: catch-all rule for event bus
+      EventPattern:
+        source:
+        - prefix: ""
+      Name: catch-all-rule
+      State: ENABLED
+      Targets:
+        - Arn: !Ref pEventCenterEventBusArn
+          Id: EventCenterEventBusArn
+          RoleArn: !GetAtt  rEventCenterRuleExecRole.Arn
