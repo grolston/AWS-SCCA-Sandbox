@@ -1,0 +1,155 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Windows EC2
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "EC2 Configuration"
+        Parameters:
+          - pInstanceType
+          - pTagKeyName
+          - pTagKeyValue
+          - pVolumeSize
+      - Label:
+          default: "Network Configuration"
+        Parameters:
+          - pSubnet
+          - pVpcId
+    ParameterLabels:
+      pInstanceType:
+        default: "Instance Type"
+      pTagKeyName:
+        default: "Tag Key"
+      pTagKeyValue:
+        default: "Tag Value"
+      pVolumeSize:
+        default: "Volume Size"
+      pVpcId:
+        default: "VPC ID"
+
+Parameters:
+  pSubnet:
+    Description: The subnet to launch the instance in to.
+    Type: AWS::EC2::Subnet::Id
+  pInstanceType:
+    Description: Desired Instance Size
+    Type: String
+    Default: t3a.small
+    AllowedValues:
+      - "t3.micro"
+      - "t3.small"
+      - "t3a.micro"
+      - "t3a.small"
+      - "t3a.medium"
+      - "c4.2xlarge"
+      - "m5.large"
+  pTagKeyName:
+    Description: 'Required: Enter the name of the key for the key-value. You''ll enter the actual value of the tag next.'
+    Default: 'Name'
+    Type: String
+    MinLength: 1
+  pTagKeyValue:
+    Description: 'Required: Enter the tag value to be applied to the instance.'
+    Type: String
+    MinLength: 1
+  pVolumeSize:
+    Description: 'Enter the number of GBs you want your volume to be. 32 GBs is recommended minimum value'
+    Type: Number
+    Default: 100
+    MinValue: 32
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VpcId of your existing Virtual Private Cloud (VPC)
+    ConstraintDescription : must be the VPC Id of an existing Virtual Private Cloud.
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-windows-latest/Windows_Server-2016-English-Full-Base'
+
+
+
+Resources:
+  WinEc2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref pInstanceType
+      Monitoring: true
+      IamInstanceProfile: !Ref rInstanceProfile
+      SourceDestCheck: true
+      SubnetId: !Ref pSubnet
+      SecurityGroupIds:
+      - !Ref rSecurityGroup
+      BlockDeviceMappings:
+      - DeviceName: "/dev/sda1"
+        Ebs:
+          VolumeSize: !Ref pVolumeSize
+      Tags:
+      - Key: !Ref pTagKeyName
+        Value: !Ref pTagKeyValue
+      UserData:
+        Fn::Base64:
+          <powershell>
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Set-ExecutionPolicy Unrestricted -Force
+          if($env:ChocolateyInstall -EQ $null){
+            iex $(iwr 'https://chocolatey.org/install.ps1' -UseBasicParsing).Content
+          }
+          </powershell>
+
+  rSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: This default security group is purposely open to the world for egress for ease of adoption.
+          - id: W29
+            reason: This default security group is purposely open on all ports for egress for ease of adoption.
+    Properties:
+      VpcId: !Ref pVpcId
+      GroupDescription: Outbound Only
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+          Description: "outbound all"
+      SecurityGroupIngress:
+        - IpProtocol: TCP
+          ToPort: 3389
+          FromPort: 3389
+          CidrIp: '10.0.0.0/8'
+          Description: RDP from AWS
+        - IpProtocol: TCP
+          ToPort: 3389
+          FromPort: 3389
+          CidrIp: '192.168.0.0/16'
+          Description: RDP from AWS
+
+
+  rRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:  !Sub "ec2-role-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy
+
+  rInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "ec2-profile-${AWS::StackName}"
+      Path: /
+      Roles:
+        - !Ref rRole
+Outputs:
+  MyInstanceId:
+    Description: Resource ID of the newly created EC2 instance
+    Value:
+      Ref: WinEc2
